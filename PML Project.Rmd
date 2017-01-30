@@ -1,0 +1,162 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Stanley Chan"
+date: "January 29, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Backgroud
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. 
+In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+ 
+**Class A:** exactly according to the specification  
+**Class B:** throwing the elbows to the front  
+**Class C:** lifting the dumbbell only halfway  
+**Class D:** lowering the dumbbell only half way  
+**Class E:** throwing the hips to the front  
+
+## Project Goal
+
+The goal of this project is to predict the manner in which they did the exercise.This is the "classe" variable in the training set. You may use any of the other variables to predict with.  
+
+You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.  
+
+## Loading Data & Library
+
+```{r load}
+library(caret)
+library(plyr)
+library(randomForest)
+library(gbm)
+library(e1071)
+
+if (!file.exists("pml_training.csv")) {
+    url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    download.file(url, destfile = "./pml_training.csv")
+}
+
+if (!file.exists("pml-testing.csv")) {
+    url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    download.file(url, destfile = "./pml-testing.csv")
+}
+
+TrainData <- read.csv("pml_training.csv", na.strings=c("",NA,"NULL"))
+TestData <- read.csv("pml-testing.csv", na.strings=c("",NA,"NULL"))
+```
+
+## Data Exploratory & Cleaning
+
+```{r Summary}
+str(TrainData)
+```
+
+We need to remove all the NA values, near zero variance and unecessary variables from the dataset before we use the dataset to build the training & Validation data for our model.
+
+```{r Removal}
+# Removal of unecessary variables
+TrainData <- TrainData[, -(1:5)]
+TestData <- TestData[, -(1:5)]
+
+# Removal of Near Zero Variance (From Caret Package) for training and test set
+TRNZero <- nearZeroVar (TrainData)
+TrainData <- TrainData[,-TRNZero]
+
+TNZero <- nearZeroVar (TestData)
+TestData <- TestData[,-TNZero]
+
+# Removal of Variance with mean of NA > 95% for training and test set
+NA95TR <- sapply(TrainData, function(x) mean(is.na(x))) > 0.95
+TrainData <- TrainData[, NA95TR==FALSE]
+
+NA95T <- sapply(TestData, function(x) mean(is.na(x))) > 0.95
+TestData <- TestData[, NA95T==FALSE]
+
+str(TrainData)
+```
+
+## Data Partitioning  
+
+We are spliting the data with 60% train data and 40% validation data.
+
+```{r Split}
+set.seed(100)
+TrainData_trainset <- createDataPartition(y=TrainData$classe, p=0.6, list=FALSE)
+training_dataset <- TrainData[TrainData_trainset, ]
+validation_dataset <- TrainData[-TrainData_trainset, ]
+```
+
+## Building Model  
+
+We are building 2 different model to compare its accuracy  
+1) gbm - Gradient Boosting Model  
+2) rf - Random forest  
+
+We are using **K-fold cross validation** with 3 folds.  
+
+```{r Setting Control}
+# Setting Train Control (K-Fold Cross Validation with K = 3)
+control <- trainControl(method="cv", number=3)
+```
+
+Building Gradient Boosting Model and save into RData file
+
+```{r Building gbm Model, results='hide'}
+# Building model for gbm
+gbm_model <- train(classe ~ ., data=training_dataset, method="gbm", trControl=control)
+save(gbm_model, file="./gbm_modelfit.RData")
+```
+
+Building Random Forest Model and save into RData file
+
+```{r Building rf Model, results='hide'}
+# Building model for rf
+rf_model <- train(classe~., data=training_dataset, method="rf", trControl=control)
+save(rf_model, file="./rf_modelfit.RData")
+```
+
+## Model Evaluation & Selection (gbm Model VS rf Model)  
+
+Confusion Matrix Table for Gradient Boosting Model
+
+```{r validate gbm}
+# Predict with the validation dataset
+gbm_model_predict <- predict(gbm_model, newdata=validation_dataset)
+
+# Out-of-sample error
+confusionMatrix(validation_dataset$classe, gbm_model_predict)
+```
+
+Confusion Matrix Table for Random Forest Model
+
+```{r validate rf}
+# Predict with the validation dataset
+rf_model_predict <- predict(rf_model, newdata=validation_dataset)
+
+# Out-of-sample error
+confusionMatrix(validation_dataset$classe, rf_model_predict)
+```
+
+From the rf model we understand the accuracy of the model is 99.73% compared to the gbm with accuracy of 98.89%, but the rf model processing time is longer than the gbm. We are choosing **Gradient Boosting Model** with tuning parameters of K-fold cross validation with 3 folds for our prediction model for our test set data. We will accept the **out-of-sample error 1.11%** for the outcome of the results, for faster processing time.
+
+## Using Final Model for pml-testing.csv prediction  
+
+```{r prediction}
+TestData_pred <- predict(gbm_model, newdata=TestData)
+
+TestData_pred_results <- data.frame(
+  problem_id=TestData$problem_id,
+  Pred_Value=TestData_pred
+)
+print(TestData_pred_results)
+```
+
+## Conclusion  
+
+From comparing the model with gbm and rf, we understand the rf is giving more accurate prediction but it is taking too long for processing the outcome. The prediction still accurate althought there are alot of missing data from the input. From the 20 cases, we succesfully predict the outcome using our model with the accuracy of 98.89%. We can use rf model given we have more processing power for faster processing time.
+
+
